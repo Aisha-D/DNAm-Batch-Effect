@@ -1,0 +1,202 @@
+---
+title: "batch_analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load the data in
+
+```{r loading}
+#load the library & phenotype file
+setwd("/mnt/data1/BDR/QC/batch_analysis")
+library(methylumi)
+library(wateRmelon)
+require(gdata)
+library(minfi)
+library(ggplot2)
+require(gridExtra)
+library(plyr)
+require(IlluminaHumanMethylationEPICmanifest)
+library(dplyr)
+library(ggfortify)
+
+#Read in the ready made idats objects
+setwd("/mnt/data1/BDR/QC/combined")
+load("BDR_Mset.rdat")
+load("BDR_RGset.rdat")
+betas<-betas(msetEPIC)
+setwd("/mnt/data1/BDR/QC/batch_analysis")
+
+#load the correct pheno
+pheno <- read.csv("/mnt/data1/BDR/QC/combined/pheno_KCL_Bris_Ox1_Ox2_Sex_Braak.csv", header = T,  stringsAsFactors = FALSE)
+pheno$Oregon<-ifelse(pheno$Brain_ID=="M1481c2"|pheno$Brain_ID=="M7342c1"|pheno$Brain_ID=="M130c1"|pheno$Brain_ID=="M1205c2", TRUE,FALSE)
+pheno$Empty<-pheno$Brain_ID=="EMPTY"
+pheno$Control<-pheno$Brain_ID=="Blank"
+rownames(pheno) <- pheno$Basename
+pheno <- pheno[order(rownames(pheno)),]
+betas <- betas[,order(colnames(betas))]
+identical(rownames(pheno), colnames(betas))
+
+#form a QC metrics and samples that failed at what steps
+QCmetrics<-pheno
+SamplesFail<-as.logical(rep("FALSE", nrow(pheno)))
+Stepsummary<-as.data.frame(matrix(ncol=0, nrow=2))
+rownames(Stepsummary)<-c("Failed This Step", "Total Failed")
+```
+
+## Check Signal Intesities
+
+The intensity check is the biggest indicator of sample quality. The median methylated signal intensity and unmethylated signal intensity for each sample is calculcated.
+
+```{r raw intensities, echo=FALSE}
+####Check Signal Intesities####
+#the median intensities for both signals are calculated and added to the QCmetrics
+# m_intensities<-methylated(msetEPIC)
+# u_intensities<-unmethylated(msetEPIC)
+# M.median<-apply(m_intensities, 2, median)
+# U.median<-apply(u_intensities, 2, median)
+# QCmetrics<-cbind(pheno,M.median, U.median)
+
+#plot intensities
+# coloured by chip
+plotfactor<-factor(pheno$SentrixID, levels=c(unique(pheno$SentrixID), "FullyMethylated", "Oregon", "Empty"))
+plotfactor[pheno$Control]<-"FullyMethylated"
+plotfactor[pheno$Oregon]<-"Oregon"
+plotfactor[pheno$Empty]<-"Empty"
+par(mfrow = c(1,2))
+hist(M.median, xlab = "Median M intensity", main="Histogram of Median Methylated Intensities", cex.main=0.7)
+hist(U.median, xlab = "Median U intensity", main="Histogram of Median Unmethylated Intensities", cex.main=0.7)
+par(mfrow = c(1,1))
+plot(M.median, U.median, pch = 16, xlab = "Median M intensity", ylab = "Median U intensity", col = rainbow(nlevels(plotfactor))[factor(plotfactor)], main="Scatter plot of Signal Intensities coloured by chip")
+par(xpd=TRUE)
+legend("topright", levels(factor(plotfactor)), col = rainbow(nlevels(plotfactor)), pch = 10, cex=0.5)
+
+#coloured by plate
+pheno$Plate=as.character(pheno$Plate)
+plotfactor<-factor(pheno$Plate, levels=c(unique(pheno$Plate), "FullyMethylated", "Oregon", "Empty"))
+plotfactor[pheno$Control]<-"FullyMethylated"
+plotfactor[pheno$Oregon]<-"Oregon"
+plotfactor[pheno$Empty]<-"Empty"
+par(mfrow = c(1,2))
+hist(M.median, xlab = "Median M intensity", main="Histogram of Median Methylated Intensities", cex.main=0.7)
+hist(U.median, xlab = "Median U intensity", main="Histogram of Median Unmethylated Intensities", cex.main=0.7)
+par(mfrow = c(1,1))
+plot(M.median, U.median, pch = 16, xlab = "Median M intensity", ylab = "Median U intensity", col = rainbow(nlevels(plotfactor))[factor(plotfactor)], main="Scatter plot of Signal Intensities coloured by plate")
+par(xpd=TRUE)
+legend("topright", levels(factor(plotfactor)), col = rainbow(nlevels(plotfactor)), pch = 10, cex=0.5)
+
+```
+
+The plot shows a trend across based on plates. This is due to technical reasons 
+
+```{r PCA of intensities}
+#plot pca of intensities
+pca_intensity <- as.data.frame(cbind(QCmetrics$M.median, QCmetrics$U.median))
+intensity_pca <- prcomp(pca_intensity, center = TRUE, scale. = TRUE)                     
+print(summary(intensity_pca))
+par(mfrow = c(1, 2))
+autoplot(intensity_pca, data = QCmetrics, colour = 'Plate')
+autoplot(intensity_pca, data = QCmetrics, colour = 'Institute')
+```
+We can note here that insititution is causing the most variation. Lets remove those samples with NA 
+
+```{r pca without NAs}
+#plot PCA again but without NA, blank or missing 
+QCmetrics2 <- na.omit(QCmetrics)
+pca_intensity <- as.data.frame(cbind(QCmetrics2$M.median, QCmetrics2$U.median))
+intensity_pca <- prcomp(pca_intensity, center = TRUE, scale. = TRUE)                     
+summary(intensity_pca)
+par(mfrow = c(1, 2))
+autoplot(intensity_pca, data = QCmetrics2, colour = 'Institute')
+#grouping is unclear - lets see if it can cluster itself
+autoplot(intensity_pca, data = QCmetrics2, colour = 'Institute', frame = T) #still a lot of overlap
+```
+
+
+```{r pca by intensities}
+pca_intensity <- as.data.frame(cbind(QCmetrics$M.median, QCmetrics$U.median))
+intensity_pca <- prcomp(pca_intensity, center = TRUE, scale. = TRUE)                     
+summary(intensity_pca)
+par(mfrow = c(1, 2))
+autoplot(intensity_pca, data = QCmetrics, colour = 'M.median')
+autoplot(intensity_pca, data = QCmetrics, colour = 'U.median')
+```
+
+
+##Compare within group variation
+We will look at within group varation - most interestingly Oxford as that was most varied on the PCA.
+```{r within group variation - Oxford}
+###Look into within group variation
+#Oxford samples interesting have the most variation for intensitites
+QCmetrics_ox <- filter(QCmetrics, QCmetrics$Institute == 'Oxford')
+pca_intensity <- as.data.frame(cbind(QCmetrics_ox$M.median, QCmetrics_ox$U.median))
+intensity_pca <- prcomp(pca_intensity, center = TRUE, scale. = TRUE)                     
+summary(intensity_pca)
+par(mfrow = c(3, 2))
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Plate')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Chip')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Position')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Gender')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Age')
+```
+We can see that the most intensity variation is likely due to plate and chip. We can run an ANOVA within-group statistics to see which variables causes so much variation.
+
+```{r normality test}
+QCmetrics_ox$Plate <- as.factor(QCmetrics_ox$Plate) 
+QCmetrics_ox$intens_ratio <-as.integer(QCmetrics_ox$M.median/QCmetrics_ox$U.median)
+par(mfrow = c(2,2))
+hist(QCmetrics_ox$M.median, xlab = "Median M intensity", 
+     main="Histogram of normal Median Methylated Intensities", cex.main=0.7)
+qqnorm(QCmetrics_ox$M.median,main="QQ plot of normal data(M,median)",pch=19)
+qqline(QCmetrics_ox$M.median)
+
+
+hist(QCmetrics_ox$U.median, xlab = "Median U intensity", 
+     main="Histogram of Median Unmethylated Intensities", cex.main=0.7)
+qqnorm(QCmetrics_ox$U.median,main="QQ plot of normal data(U.median)",pch=19)
+qqline(QCmetrics_ox$U.median)
+
+```
+
+
+
+
+```{r looking at variation within plates}
+QCmetrics_ox$Plate <- as.factor(QCmetrics_ox$Plate) 
+par(mfrow = c(1, 2))
+ggplot(QCmetrics_ox, aes(QCmetrics_ox$Plate, QCmetrics_ox$M.median)) +
+  geom_violin(fill = "lightblue3") +
+  geom_boxplot() +
+  labs(x = "Plates", y = "M.median intensity ",
+        title ="Methylated median intesity across plates") 
+
+ggplot(QCmetrics_ox, aes(QCmetrics_ox$Plate, QCmetrics_ox$U.median)) +
+  geom_violin(fill = "thistle1") +
+  geom_boxplot()+
+  labs(x = "Plates", y = "U.median intensity ",
+       title ="Unmethylated median intesity across plates")
+
+```
+```{r ANOVA and Post-Hoc test}
+QCmetrics_ox$intens_ratio <-as.integer(QCmetrics_ox$M.median/QCmetrics_ox$U.median)
+anova1 <-aov(QCmetrics_ox$intens_ratio~QCmetrics_ox$Plate)
+print(summary(anova1))
+pht <- TukeyHSD(anova1)
+print(pht)
+pht1 <- as.data.frame(pht$`QCmetrics_ox$Plate`)
+p_adj <- pht1$`p adj` <- as.factor(pht1$`p adj`)
+ggplot(pht1, aes(rownames(pht1), pht1$diff, fill = p_adj)) +
+  geom_col() +
+  ylim(-0.05, 0.05) +
+  labs(x = "Plates", y = "Mean Difference",
+       title ="Mean differences between Plates") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+
+
+
+
