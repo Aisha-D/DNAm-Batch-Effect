@@ -1,5 +1,4 @@
 #load the library & phenotype file
-setwd("/mnt/data1/BDR/QC/batch_analysis")
 library(methylumi)
 library(wateRmelon)
 require(gdata)
@@ -12,9 +11,8 @@ library(dplyr)
 library(tidyr)
 
 #Read in the ready made idats objects
-setwd("/mnt/data1/BDR/QC/combined")
-load("BDR_Mset.rdat")
-load("BDR_RGset.rdat")
+setwd("/mnt/data1/aisha/dnam_qc/DNAm-Batch-Effect/")
+load("BDR_All_Mset.rdat")
 betas<-betas(msetEPIC)
 setwd("/mnt/data1/aisha/dnam_qc/DNAm-Batch-Effect")
 
@@ -121,3 +119,6 @@ autoplot(intensity_pca, data = QCmetrics2, colour = 'M.median')
 autoplot(intensity_pca, data = QCmetrics2, colour = 'U.median')
 
 #move onto the next script to filter for what we want to analyse
+write.csv(betas, "betas.csv") 
+write.csv(QCmetrics, "QCmetrics.csv")
+save(betas, QCmetrics, file = "Batch_effect_data.RData")
