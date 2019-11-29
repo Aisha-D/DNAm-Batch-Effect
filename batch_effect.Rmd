@@ -9,7 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Load the data in
 
-```{r loading}
+```{r loading, warning = F}
 #load the library & phenotype file
 setwd("/mnt/data1/BDR/QC/batch_analysis")
 library(methylumi)
@@ -54,11 +54,11 @@ The intensity check is the biggest indicator of sample quality. The median methy
 ```{r raw intensities, echo=FALSE}
 ####Check Signal Intesities####
 #the median intensities for both signals are calculated and added to the QCmetrics
-# m_intensities<-methylated(msetEPIC)
-# u_intensities<-unmethylated(msetEPIC)
-# M.median<-apply(m_intensities, 2, median)
-# U.median<-apply(u_intensities, 2, median)
-# QCmetrics<-cbind(pheno,M.median, U.median)
+m_intensities<-methylated(msetEPIC)
+u_intensities<-unmethylated(msetEPIC)
+M.median<-apply(m_intensities, 2, median)
+U.median<-apply(u_intensities, 2, median)
+QCmetrics<-cbind(pheno,M.median, U.median)
 
 #plot intensities
 # coloured by chip
@@ -136,10 +136,10 @@ pca_intensity <- as.data.frame(cbind(QCmetrics_ox$M.median, QCmetrics_ox$U.media
 intensity_pca <- prcomp(pca_intensity, center = TRUE, scale. = TRUE)                     
 summary(intensity_pca)
 par(mfrow = c(3, 2))
-autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Plate')
-autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Chip')
-autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Position')
-autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Gender')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Plate', frame = T)
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Chip', frame = T)
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Position', frame = T)
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Gender', frame = T)
 autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Age')
 ```
 We can see that the most intensity variation is likely due to plate and chip. We can run an ANOVA within-group statistics to see which variables causes so much variation.
@@ -178,8 +178,10 @@ ggplot(QCmetrics_ox, aes(QCmetrics_ox$Plate, QCmetrics_ox$U.median)) +
   geom_boxplot()+
   labs(x = "Plates", y = "U.median intensity ",
        title ="Unmethylated median intesity across plates")
-
 ```
+
+
+
 ```{r ANOVA and Post-Hoc test}
 QCmetrics_ox$intens_ratio <-as.integer(QCmetrics_ox$M.median/QCmetrics_ox$U.median)
 anova1 <-aov(QCmetrics_ox$intens_ratio~QCmetrics_ox$Plate)
@@ -195,6 +197,8 @@ ggplot(pht1, aes(rownames(pht1), pht1$diff, fill = p_adj)) +
        title ="Mean differences between Plates") +
   theme(axis.text.x = element_text(angle = 45))
 ```
+
+There is significant differences in the means of plates 9 and 11 and plates 9 and 12 are different as the p adj value is less than 0.05.
 
 
 

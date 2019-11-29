@@ -1,4 +1,6 @@
 ##Within-group analysis script##
+
+load("/mnt/data1/aisha/dnam_qc/DNAm-Batch-Effect/Batch_effect_data.RData")
 ##libraries
 library(cvequality)
 library(ggplot2)
@@ -14,6 +16,8 @@ library(wateRmelon)
 library(gplots)
 library(factoextra)
 library(ggpubr)
+library(R.utils)
+
 ##functions
 #function allows multiple plots to a page
 multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
@@ -58,8 +62,20 @@ QCmetrics <- separate(data = QCmetrics, col = Basename,
                       into = c("Chip", "Chip_Position"), sep="_")
 QCmetrics$Basename <- rownames(QCmetrics)
 
+#change plate 6 of bristol to plate6b as it can overlap with manchester]
+QCmetrics_br <- QCmetrics[which(QCmetrics$Institute == 'Bristol'),]
+QCmetrics_no_br <- QCmetrics[which(QCmetrics$Institute != 'Bristol'),]
+QCmetrics_no_br$Plate[QCmetrics_no_br$Plate == "Plate6"] <- "Plate6m" #m stands for plate 6 of manchester samples
+#QCmetrics_br$Plate[QCmetrics_br$Plate == "Plate6"] <- "Plate6"
+QCmetrics <- rbind(QCmetrics_no_br, QCmetrics_br)
 
-######WITHIN GROUP VARIATION########
+#change the beta data to fit the the samples used now
+betas <- betas[,colnames(betas) %in% rownames(QCmetrics)]
+
+###########################################
+######   WITHIN GROUP VARIATION    ########
+###########################################
+
 ###Look into within group variation
 
 #Provides pdf of each institute and pca of each variable
@@ -116,8 +132,9 @@ for (i in 1:length(insts)){
 
 
 
-
-#####NORMALISATION VIOLENCE#########
+###########################################
+######   NORMALISATION VIOLENCE   #########
+###########################################
 ###within plate
 #use qual function on different plates -betas
 
@@ -169,23 +186,6 @@ for (i in 1:length(insts)){
 
 
 
-
-
-#rmsd hist plots
-dat = list(tmpdat_v1, tmpdat_v2) #set what dataframe you want to test
-dattype = c("betas", "m_intensitites", "u_intensities") #what titles are these dataframes from?
-pdf('plate rmsd hist.pdf')
-par(mfrow = c(2,2))
-for (i in 1:2){
-  tmpdat <- dat[i]
-  tmpdat <- as.data.frame(tmpdat)
-  hist(tmpdat$rmsd,
-       main = paste(dattype[i], "rmsd between pl9 & pl10", sep =" "),
-       xlab = "rmsd")
-}
-dev.off()
-
-
 ####within institute#####
 #use qual function on different inst -betas
 v1 <- filter(QCmetrics, QCmetrics$Institute == 'Bristol')[,8]
@@ -218,9 +218,9 @@ for (i in 1:3){
 }
 dev.off()
 
-####within study####
 
-#heatmap of intesity top varying probes
+
+####heatmap of intesity top varying probes####
 sigma<-apply(betas_ox2, 1, sd)# this is calculation the standard deviation of all probes
 plot(hclust(dist(t(betas[order(sigma, decreasing = TRUE)[1:500],]))), 
      labels = paste(pheno$Sex, sep = "_"), 
@@ -303,24 +303,367 @@ pheatmap(betas1[order(sigma, decreasing = TRUE)[1:500],],
          main="Top varying probes")
 dev.off()
 
-####Mean Correlation####14/10/19####
-library(ggpubr)
+
+
+
+####Plotting boxplots of plates coloured by institue####16/10/19####
+#This will measure the mean and interquatile range of the plates
+vecname = list()
+QCmetrics$Plate <- as.factor(QCmetrics$Plate)
+for (i in 1:nlevels(QCmetrics$Plate)){
+  vecname[i] <- paste('Plate', i, sep = "")
+}
+vecname <- unlist(vecname)
+vecname2 <- insert(vecname, ats = 7, values = 'Plate6m')
+
+QCmetrics3 <- QCmetrics
+QCmetrics3$Plate <- factor(QCmetrics3$Plate, levels = vecname2)
+
+pdf('boxplots of plate.pdf', onefile = T)
+par(mar = c(6,7,6,7))
+ggplot(QCmetrics3, aes(x = Plate, y = M.median, 
+                      fill = Institute)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45))
+
+ggplot(QCmetrics3, aes(x = Plate, y = U.median, 
+                       fill = Institute)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45))
+        
+dev.off()
+library(R.utils)
+
+
+
+
+###########################################
+##########    CORRELATION     #############
+###########################################
+
+
+#Mean Correlation####14/10/19####
+#We try to find the correlation between the methylation of probes between plates
 betas1 <- as.data.frame(betas)
+cor_mat <- matrix(data = NA, nrow =  ncol(betas), ncol = ncol(betas))
+cor_mat <- as.data.frame(cor_mat)
+betas2 <- betas[,1:30]
+
+res <- cor(betas2)
+library("Hmisc")
+
+res2 <- rcorr(as.matrix(betas2))
+library(corrplot)
+pdf('cor.pdf')
+corrplot(res2[[1]], type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+dev.off()
+
+#plots look the same as they are from the same plate. Pull out plates from different 
+#institutes and compare then across each other
+for (i in 1:nrow(cor_mat)){
+  samp1 = betas1[,i] #take a row from the matrix
+  for (k in 1:nrow(cor_mat)){
+    samp2 = betas1[,k] #take another row
+    res <- cor.test(samp1, samp2, method = "pearson")
+    val <- res$estimate
+    cor_mat[k,i] <- val
+  }
+}
 
 res <- cor.test(betas1$`201414140087_R01C01`, betas1$`201414140130_R01C01`, 
                 method = "pearson")
 res$estimate
 
 
-# pdf('test.pdf')
-# ggscatter(betas, x = '201414140087_R01C01', y = '201414140130_R01C01',
-#           add = 'reg.line',
-#           add.params = list(color = 'blue', fill = 'lightgray'),
-#           conf.int = T) +
-#   stat_cor(method = 'pearson') +
-#   labs(title = "Correlation between UK and Indian significant sites on age (frontal)",
-#        x = 'India', y = 'UK')
-# dev.off()
+###########################################
+##########    CHIP POSITION    ############
+###########################################
+####by chip####
+QCmetrics <- QCmetrics %>% group_by(Chip_Position) %>% sample_n(6)
+QCmetrics$Plate <- "Plate0"
+qc7$Case.Control[qc7$Case.Control== '0'] <- "control"
+
+#QCmetrics_org <- QCmetrics
+QCmetrics_org -> QCmetrics
+#Chip position
+plate1 <- QCmetrics[which(QCmetrics$Plate == 'Plate1'),]
+plate5 <- QCmetrics[which(QCmetrics$Plate == 'Plate5'),]
+plate1 <- rbind(plate1, plate5)
+plate1$Chip <- as.factor(plate1$Chip)
+plate1$Chip_Position <- as.factor(plate1$Chip_Position)
+
+QCmetrics <- pheno <- plate1
+
+plates<-unique(QCmetrics$Plate)
+QCmetrics$Position<-factor(QCmetrics$Position)
+QCmetrics$Chip<-factor(QCmetrics$Chip, levels=rev(unique(QCmetrics$Chip))) #keeps the levels of the factor in current order rather than sorting numerically/alphabetically, also reverses this order as heatmaps plot bottom to top
+require(gridExtra)
+
+pdf('KCL and Bristol batch chip pos.pdf')
+#compare all chips and positions as one plate
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  legend
+}
+for(plate in plates){
+  samples<-QCmetrics[which(QCmetrics$Plate == plate),]
+  
+  plateHeatmap <- ggplot(data=samples, aes(x=Position, y=Chip)) +
+    scale_fill_gradientn(colours=colorRamps::matlab.like(100), limits=c(min(QCmetrics$U.median),max(QCmetrics$M.median))) +
+    labs(x="", y="") +
+    theme_minimal() + 
+    coord_equal() +
+    theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 90, hjust=1))
+  
+  plot1 <- plateHeatmap +
+    ggtitle("Median Methylated Intensity") +
+    geom_tile(aes(fill=M.median), colour = "white") +
+    theme(legend.position = "none") +
+    theme(plot.title = element_text(size = 10))
+  
+  plot2 <- plateHeatmap +
+    ggtitle("Median Unmethylated Intensity") +
+    geom_tile(aes(fill=U.median), colour = "white") +
+    theme(legend.position = "none") +
+    theme(plot.title = element_text(size = 10))
+  
+  legendplot<-plateHeatmap + 
+    geom_tile(aes(fill=U.median), colour = "white") +
+    labs(fill="Intensity") +
+    scale_alpha_manual(values=c(1,1,1)) + 
+    guides(alpha = guide_legend(override.aes = list(colour="black", pch=16)))
+  
+  legend<-g_legend(legendplot)
+  grid.arrange(plot1, plot2, legend, ncol=3, widths=c(3/7, 3/7, 1/7), top=paste("", plate))
+}
+dev.off()
+
+posi <- c('R02C01', 'R04C01', 'R06C01', 'R08C01')
+plate1 <- plate1[(plate1$Chip_Position == 'R02C01' & plate1$Chip_Position == 'R04C01' & 
+                    plate1$Chip_Position == 'R06C01' & plate1$Chip_Position == 'R08C01'),]
+
+plate1 <- filter(plate1, plate1$Chip_Position == 'R02C01' & plate1$Chip_Position == 'R04C01' & 
+                   plate1$Chip_Position == 'R06C01' & plate1$Chip_Position == 'R08C01')
+plate1 <- plate1[(plate1$Chip_Position %in% posi), ] #take the same pis
+plate5 <- plate5[(plate5$Chip_Position %in% posi), ]
+
+plate5 <- plate5[order(plate5$Chip_Position),]
+plate1 <- plate1[order(plate1$Chip_Position),]
+
+toDelete <- seq(1, nrow(plate5), 2)
+plate5 <- plate5[toDelete ,]
+plate5 <- plate5[-9,]
+
+betas_v1 <- betas[,colnames(betas) %in% rownames(plate1)]
+betas_v2 <- betas[,colnames(betas) %in% rownames(plate5)]
+normv1 <- qual(betas_v1, betas_v2)
+plot(normv1[,1:2], main = 'Bristol vs KCL betas')
+
+
+#rmsd hist plots
+dat = list(tmpdat_v1, tmpdat_v2) #set what dataframe you want to test
+dattype = c("betas", "m_intensitites", "u_intensities") #what titles are these dataframes from?
+pdf('plate rmsd hist.pdf')
+par(mfrow = c(2,2))
+for (i in 1:2){
+  tmpdat <- dat[i]
+  tmpdat <- as.data.frame(tmpdat)
+  hist(tmpdat$rmsd,
+       main = paste(dattype[i], "rmsd between pl9 & pl10", sep =" "),
+       xlab = "rmsd")
+}
+dev.off()
+
+#########################
+####Watermelon###########
+#########################
+test <- dmrse_row(betas)
+test2 <- dmrse(betas)
+test3 <- dmrse_col(betas)
+
+library(quantmod)
+load("/mnt/data1/BDR/QC/combined/BDR_Mset.rdat")
+msetEPIC <- msetEPIC[,colnames(msetEPIC) %in% colnames(betas)]
+
+plotmset_density<-function(mset, study=""){
+  onetwo<-fData(mset)$DESIGN
+  mat<-betas(mset)
+  
+  plot(density(mat[onetwo=="I",1], na.rm=T, bw=0.03), cex.main=0.8, main=paste(study, "Betas"), ylim=c(0, 5.2), xlab="")
+  lines(density(mat[onetwo=="II",1], na.rm=T, bw=0.03), col="red")
+  
+  for(j in 2:ncol(mat)){
+    lines(density(mat[onetwo=="I",j], na.rm=T, bw=0.03))
+    lines(density(mat[onetwo=="II",j], na.rm=T, bw=0.03), col="red")
+  }
+  
+  legend("topright", legend=c("Type I", "Type II"), lty=1, col=c("black", "red")) 
+}
+plotmset_density(msetEPIC, study = 'Batch')
+
+pk <- matrix(data = NA, nrow = nrow(betas), ncol = 2)
+
+onetwo<-fData(msetEPIC)$DESIGN
+mat<-betas(msetEPIC)
+
+for(j in 1:8){
+  p <- findPeaks(mat[onetwo=="I",j])
+  pk[j,1] <- sd(p)
+  p2 <- findPeaks(mat[onetwo=="II",j])
+  pk[j,2] <- sd(p2)
+}
+
+library(psych)
+
+pk1 <- describe(pk[,1],type=2) 
+pk1_se <- pk1$se
+
+pk2 <- describe(pk[,2],type=2) 
+pk2_se <- pk2$se
+
+pkk <- as.data.frame(pk)
+pdf('boxplot.pdf')
+ggplot(pkk, aes(pkk[,1])) +
+    geom_boxplot()
+dev.off()
+
+pdf('test.pdf')
+plot(mat[onetwo=="I",1])
+dev.off()
+
+p = density(mat[onetwo=="I",1], na.rm=T, bw=0.03)
+p1 <-p$y
+p2 <- max(p1)
+head(p)
+#order p$y than select the two highest peaks. These two points should be the methylated
+#unmethylated of type take. Place this in the matrix table
+pk <- matrix(data = NA, nrow = ncol(mat), ncol = 2)
+for(j in 1:ncol(mat)){
+  one <- density(mat[onetwo=="I",j], na.rm=T, bw=0.03)
+  oney <- one$y
+  pk[j,1] <- max(oney)
+  two <- density(mat[onetwo=="II",j], na.rm=T, bw=0.03)
+  twoy <- two$y
+  pk[j,2] <- max(twoy)
+}
+
+
+pk <- as.data.frame(pk)
+boxplot(pk[,1], pk[,2])
+sdpk1 <- sd(pk[,1])
+sdpk2 <- sd(pk[,2])
+
+
+#checking out fullymethylated probes
+fpheno <- read.csv("/mnt/data1/BDR/QC/combined/FullyMethylatedControlSamples.csv", stringsAsFactors = F)
+fopheno <- read.csv("/mnt/data1/BDR/QC/foetal_qc/FullyMethylatedControlSamples.csv", stringsAsFactors = F)
+
+fpheno <- rbind(fpheno,fopheno)
+lowintensitysamples<-which(fpheno$M.median < 2000 | fpheno$U.median < 2000)
+Intensity<-rep("OK", nrow(fpheno))
+Intensity[lowintensitysamples] <-"LowIntensity"
+
+plotfactor<-as.factor(Intensity)
+plot(fpheno$M.median, fpheno$U.median, pch = 16, xlab = "Median M intensity", 
+     ylab = "Median U intensity", col = 'blue')
+text(fpheno$M.median, fpheno$U.median, labels=fpheno$Date_Ran, cex= 0.7)
+
+library(methylumi)
+library(wateRmelon)
+#Plot density lines
+idatPath<-as.character(fpheno$iDAT_Location[1])
+#force = T for samples that have been run on different arrays ie 450K
+msetFM <- readEPIC(idatPath=idatPath, barcodes=fpheno$Basename, parallel = FALSE, force = T)
+save(msetFM, file="Batch_msetFM.rdat")
+
+
+plotmset_density<-function(mset, study=""){
+  onetwo<-fData(mset)$DESIGN
+  mat<-betas(mset)
+  
+  plot(density(mat[onetwo=="I",1], na.rm=T, bw=0.03), cex.main=0.8, 
+       main=paste(study, "Betas"), ylim=c(0, 5.2), xlab="", xlim=c(0,1))
+  lines(density(mat[onetwo=="II",1], na.rm=T, bw=0.03), col="red", xlim=c(0,1))
+  
+  for(j in 2:ncol(mat)){
+    lines(density(mat[onetwo=="I",j], na.rm=T, bw=0.03))
+    lines(density(mat[onetwo=="II",j], na.rm=T, bw=0.03), col="red")
+  }
+  
+  legend("topright", legend=c("Type I", "Type II"), lty=1, col=c("black", "red")) 
+}
+
+plotmset_density(msetFM, study = 'Batch')
+
+msetFM.dasen<-dasen(msetFM)
+plotmset_density(msetFM.dasen, study = 'Batch')
+betafm <- betas(msetFM)
+betafm.dasen <- betas(msetFM.dasen)
+boxplot(betafm[,1:2])
+
+betafm <- as.data.frame(betafm)
+
+ggplot(betafm, aes(betafm[1:2], betafm[,1:2])) +
+  geom_boxplot()
+
+#same as nasen but type I and type II backgrounds are equalized first.
+#quantile normalizes methylated and unmethylated intensities separately, then calculates betas
+pdf('FullyMethy2.pdf')
+plotmset_density(msetFM, study = 'Batch')
+plotmset_density(msetFM.dasen, study = 'Batch')
+dev.off()
+
+#Not normalised
+onetwo<-fData(msetFM)$DESIGN
+mat<-betas(msetFM)
+pk <- matrix(data = NA, nrow = ncol(mat), ncol = 2)
+for(j in 1:ncol(mat)){
+  one <- density(mat[onetwo=="I",j], na.rm=T, bw=0.03)
+  oney <- one$y
+  pk[j,1] <- max(oney) #highest peak in type I
+  two <- density(mat[onetwo=="II",j], na.rm=T, bw=0.03)
+  twoy <- two$y
+  pk[j,2] <- max(twoy) #highest peak in type II
+}
+pk <- as.data.frame(pk)
+boxplot(pk[,1], pk[,2])
+sdpk1 <- sd(pk[,1])
+sdpk2 <- sd(pk[,2])
+
+#Dasen Normalised
+onetwo<-fData(msetFM.dasen)$DESIGN
+mat<-betas(msetFM.dasen)
+pk <- matrix(data = NA, nrow = ncol(mat), ncol = 2)
+for(j in 1:ncol(mat)){
+  one <- density(mat[onetwo=="I",j], na.rm=T, bw=0.03)
+  oney <- one$y
+  pk[j,1] <- max(oney) #highest peak in type I
+  two <- density(mat[onetwo=="II",j], na.rm=T, bw=0.03)
+  twoy <- two$y
+  pk[j,2] <- max(twoy) #highest peak in type II
+}
+pk <- as.data.frame(pk)
+boxplot(pk[,1], pk[,2])
+sdpk1.n <- sd(pk[,1])
+sdpk2.n <- sd(pk[,2])
+
+png('fullmeth.png')
+boxplot(betafm[,1:12])
+dev.off()
+
+png('fullmeth dasen.png')
+boxplot(betafm.dasen[,1:12])
+dev.off()
+
+library(minfi)
+RGset <- read.metharray.exp(base = idatPath, targets = fpheno, force = TRUE)
+save(RGset, file="Batch_RGset.rdat")
+MSet.raw<- preprocessRaw(RGset)
+MSet.norm <- preprocessIllumina(RGset, bg.correct = TRUE, normalize = "controls", reference = 2)
+controlStripPlot(RGset, controls="specificity I",sampNames = fpheno$Basename) #can chnage this
 
 
 

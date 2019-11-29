@@ -113,6 +113,17 @@ autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Chip')
 autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Position')
 autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Gender')
 autoplot(intensity_pca, data = QCmetrics_ox, colour = 'Age')
+autoplot(intensity_pca, data = QCmetrics_ox, colour = 'BR')
+
+library(factoextra)
+intensity_pca
+fviz_pca_contrib(intensity_pca, choice = "var", axes = 1)
+
+screeplot(intensity_pca, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
+abline(h = 1, col="red", lty=5)
+legend("topright", legend=c("Eigenvalue = 1"),
+       col=c("red"), lty=5, cex=0.6)
+#lda plot to seperate across plots?
 
 #Normality test
 QCmetrics_ox$Plate <- as.factor(QCmetrics_ox$Plate) 
@@ -171,3 +182,67 @@ hist(QCmetrics_ox$intens_ratio, xlab = "Intensity ratio intensity",
 qqnorm(QCmetrics_ox$U.median,main="QQ plot of normal data(U.median)",pch=19)
 qqline(QCmetrics_ox$U.median)
        
+
+
+##plotting means etc..
+pairs(as.levelsMap(QCmetrics_ox$Plate), och = 19)
+install.packages("cvequality")
+library(cvequality)
+library(ggplot2)
+library(ggbeeswarm)
+ggplot(QCmetrics_ox, 
+       aes(Plate, 
+          intens_ratio)) +
+  geom_boxplot() +
+  geom_quasirandom(alpha = 0.5) +
+  theme_bw()
+QCmetrics_ox2 <- QCmetrics_ox
+QCmetrics_ox2$Plate <- as.factor(QCmetrics_ox2$Plate)
+asymptotic_test <- with(QCmetrics_ox, asymptotic_test(Plate, intens_ratio))
+
+#lda
+library(MASS)
+QCmetrics_ox.lda <- lda(Plate ~ M.median + U.median, data = QCmetrics_ox)
+QCmetrics_ox.lda
+QCmetrics_ox.lda.values <- predict(QCmetrics_ox.lda)
+ldahist(QCmetrics_ox.lda.values$x[,1], g = Plate)
+newdata <- data.frame(type = QCmetrics_ox$Plate, lda = QCmetrics_ox.lda.values$x) 
+ggplot(newdata) + geom_point(aes(lda.LD1, lda.LD2, colour = type), size = 2.5)
+
+#filter the betas probes that were from oxford sample
+betas_ox <- as.data.frame(betas)
+rownames(QCmetrics_ox) <- QCmetrics_ox$Basename
+betas_ox2 <- betas_ox[, rownames(QCmetrics_ox)]
+betas_ox3 <- as.data.frame(t(betas_ox2))
+identical(rownames(betas_ox3), rownames(QCmetrics_ox))
+betas_ox3[is.na(betas_ox3)] <- ""
+library(tidyverse)
+betas_ox4 <- drop_na(betas_ox3)
+betas_pca <- prcomp(na.omit(betas_ox4))
+fit <- princomp(na.omit(betas_ox4), cor = TRUE)
+
+summary(intensity_pca)
+autoplot(intensity_pca, data = pheno_intesity, colour = 'Plate')
+
+##combat to correcct plate batch effect
+plotlines(betas_ox2)
+library(sva)
+library(limma)
+pheno1 <- QCmetrics_ox
+batch = pheno1$Plate
+modcombat = model.matrix(~1, data=pheno1)
+combat_edata = ComBat(dat=pheno1, batch=batch, mod=modcombat, par.prior=TRUE, prior.plots= F)
+sum(is.na(pheno1))
+
+modBatch = model.matrix(~as.factor(Basename) + as.factor(batch),data = environment(pheno1)) #The model matrix being used to fit the data
+mod0Batch = model.matrix(~as.factor(batch),data=environment(pheno1)) #null model being compared when fitting the data
+pValuesBatch = f.pvalue(betas_ox2,modBatch,mod0Batch)
+plot(modBatch)
+
+##wateRmelon
+library(wateRmelon)
+boxplot(log(m_intensities), las=2, cex.axis=0.8 )
+pdf('beta oxford samples differences.pdf')
+boxplot(log(betas_ox2), las=2, cex.axis=0.8 )
+dev.off()
+##bisulfite conversion batch effect???
